@@ -1,0 +1,22 @@
+/**
+ * Cloudflare 部署配置（README 顶部「Deploy to Cloudflare」按钮依赖本文件识别工程）
+ *
+ * 采用 Workers 静态资产模式托管 dist/（与 Pages 同级能力，官方现役推荐）：
+ * - build.command：部署向导克隆仓库后先跑构建
+ * - assets.directory：托管 vite 产物
+ * - not_found_handling = "single-page-application"：未命中路径回退 index.html，
+ *   等价于 nginx 的 try_files 兜底
+ *
+ * 手动部署：npx wrangler deploy
+ */
+{
+  "name": "panhub",
+  "compatibility_date": "2026-09-24",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "build": {
+    "command": "npm run build"
+  }
+}

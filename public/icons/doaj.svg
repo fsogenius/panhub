@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="DOAJ">
+  <rect width="48" height="48" rx="10" fill="#ea580c"/>
+  <path d="M15.5 10h11.8l7.2 7.2V37a2 2 0 0 1-2 2h-17a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z" fill="#ffffff"/>
+  <path d="M27.3 10v7.2h7.2" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M18 25.5h13M18 30.5h9" stroke="#ea580c" stroke-width="2" stroke-linecap="round"/>
+</svg>

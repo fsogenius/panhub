@@ -1,0 +1,23 @@
+# 依赖与构建产物（镜像内重新安装/构建）
+node_modules
+dist
+
+# 版本控制与 CI
+.git
+.github
+
+# 本地日志 / 系统文件
+logs
+*.log
+.DS_Store
+
+# IDE / 工具
+.idea
+.fleet
+.claude
+.codebuddy
+.playwright-mcp
+
+# 本地环境变量（本仓库不该有，防御性排除）
+.env
+.env.*

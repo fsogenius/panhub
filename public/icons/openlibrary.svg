@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Open Library">
+  <rect width="48" height="48" rx="10" fill="#d97706"/>
+  <path d="M24 13.5c-3.2-2.1-7.4-3-10.4-3-.9 0-1.4.5-1.4 1.4v20.4c0 .9.5 1.4 1.4 1.4 3 0 7.2.9 10.4 3 3.2-2.1 7.4-3 10.4-3 .9 0 1.4-.5 1.4-1.4V11.9c0-.9-.5-1.4-1.4-1.4-3 0-7.2.9-10.4 3z" fill="#ffffff"/>
+  <path d="M24 13.5v23.2" stroke="#d97706" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

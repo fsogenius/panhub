@@ -1,0 +1,25 @@
+{
+  "name": "panhub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PanHub · 全网网盘聚合搜索",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4",
+    "TagCloud": "^2.5.0",
+    "vue": "^3.5.18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7",
+    "vue-tsc": "^2.2.0"
+  }
+}

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>PanHub · 全网最全的网盘搜索</title>
+    <meta
+      name="description"
+      content="PanHub：聚合阿里云盘、夸克、百度网盘、115、迅雷等平台的全网最全网盘搜索工具，实时检索分享资源，快速、高效。"
+    />
+    <meta
+      name="keywords"
+      content="网盘搜索, 阿里云盘, 夸克, 百度网盘, 115, 迅雷, 资源搜索, 盘搜, panhub, 网盘聚合搜索"
+    />
+    <meta name="theme-color" content="#111111" />
+    <!-- 站点图标 / PWA manifest 统一使用官方 logo（CDN SVG） -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/blog/imgx-20260828-151509-5bk7.svg"
+    />
+    <link rel="manifest" href="./site.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+
+    <!--
+      wx-auth 公共登录组件（全局单例 window.WxAuth）+ 顶部导航 Web Component。
+      CDN 容灾（对齐官方站 2026-09-20）：unpkg 主源、jsdelivr 备源，单个源
+      限时 6s，失败/超时立即切下一个——unpkg TCP 黑洞时 onerror/onload 都不
+      触发，必须靠 setTimeout 兜底。SDK 两个源全挂时导航照常加载（登录挂了，
+      页面骨架不能挂）；WxAuth 的 init 由应用内 initAuth 负责（带认证回调）。
+    -->
+    <script>
+      (function () {
+        var SDK_URLS = [
+          "https://unpkg.com/wx-auth-sdk@^1.2.44/dist/wx-auth.umd.js",
+          "https://cdn.jsdelivr.net/npm/wx-auth-sdk@1/dist/wx-auth.umd.js",
+        ];
+        var NAVBAR_URL =
+          "https://unpkg.com/@wu529778790/site-navbar@latest/dist/site-navbar.wc.js";
+        var PER_ATTEMPT_TIMEOUT_MS = 6000;
+        function loadNavbar() {
+          var s = document.createElement("script");
+          s.src = NAVBAR_URL;
+          document.head.appendChild(s);
+        }
+        function tryCdn(i) {
+          if (window.WxAuth) return loadNavbar();
+          if (i >= SDK_URLS.length) {
+            console.warn(
+              "[wx-auth] 所有 CDN 均加载失败，认证与头像登录不可用，页面其余功能不受影响"
+            );
+            return loadNavbar();
+          }
+          var s = document.createElement("script");
+          s.src = SDK_URLS[i];
+          var settled = false;
+          var timer = setTimeout(settle, PER_ATTEMPT_TIMEOUT_MS);
+          function settle() {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            s.remove();
+            tryCdn(i + 1);
+          }
+          s.onload = settle;
+          s.onerror = settle;
+          document.head.appendChild(s);
+        }
+        tryCdn(0);
+      })();
+    </script>
+
+    <script>
+      // 首屏即时应用系统深色模式（避免闪白）
+      (function () {
+        try {
+          if (
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+          ) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
