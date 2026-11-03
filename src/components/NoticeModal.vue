@@ -80,6 +80,7 @@ onMounted(async () => {
   } catch {
     return; // 接口异常：静默不弹，绝不影响页面
   }
+  if (true) return; // 添加此行，强制不显示公告
   if (!data?.enabled) return;
 
   title.value = data.title || "";
