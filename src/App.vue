@@ -327,7 +327,7 @@ function onResize() {
 // forceVerify 在登录成功（isVerified 置位）时返回 true，useTransfer 收到后
 // 自动重试本次获取——全程无需再点一次。模块级注册：ResultGroup 等无参调用
 // 触发的获取同样生效。
-useTransfer(() => forceVerify());
+useTransfer();
 
 /** 服务端 401：登录态失效 → 强制重新认证后重试 */
 let authRetrying = false;

@@ -182,7 +182,7 @@ async function handleGet(r: MergedLink) {
   // 所有条目统一可点，点标题与点「获取」按钮走同一入口。
   // 疑似失效（探活 bad）不再拦——它只是猜测，交给 requestTransfer 用真实转存
   // 确认；已确认失效（dead）由 useTransfer 内部兜底提示，不发请求。
-  await requestTransfer({ tid: r.tid, url: r.url, name: r.note });
+  await requestTransfer({ tid: r.tid, url: r.url, name: r.note, password: r.password });
 }
 
 // 注意：visibleItems 必须先于下方 watch 声明——watch({ immediate: true }) 会在
