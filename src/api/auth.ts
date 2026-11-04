@@ -28,8 +28,10 @@ export interface WxAuthUser {
 export interface WxAuthSDK {
   init(options?: Record<string, any>): void;
   silentCheck(): Promise<boolean>;
-  showAuthModal(): Promise<void>;
-  requireAuth(): Promise<boolean>;
+  showAuthModal(options?: { required?: boolean }): Promise<void>;
+  requireAuth(options?: { required?: boolean }): Promise<boolean>;
+  /** 切换登录方式：code = 公众号验证码，mp = 小程序扫码 */
+  switchMode?(mode: "code" | "mp"): void;
   clearToken(): void;
   getToken?(): string | null;
   onVerified(user: any): void;
@@ -162,6 +164,14 @@ export const isReady = ref(false);
 let silentSettled = false;
 let silentPromise: Promise<void> = Promise.resolve();
 
+/** 登录弹窗被用户关闭时的回调：让等待中的逻辑立即结束，而不是空等超时 */
+let closeWaiters: Array<() => void> = [];
+function notifyLoginClosed(): void {
+  const waiters = closeWaiters;
+  closeWaiters = [];
+  for (const fn of waiters) fn();
+}
+
 /**
  * 应用启动时调用一次：初始化 SDK 并做静默登录态校验。
  * Cookie 有效 → onVerified → isVerified = true（后续搜索零打扰）。
@@ -185,8 +195,8 @@ export function initAuth(): void {
           apiBase: WX_AUTH_API_BASE,
           // silent: 只做 Cookie 静默校验，不自动弹窗（弹窗时机由 checkSearchAuth 控制）
           silent: true,
-          // required: 弹窗不可关闭、遮罩不可点穿，必须完成验证
-          required: true,
+          // required: 弹窗可关闭、遮罩可点穿，用户可随时退出登录流程
+          required: false,
           onVerified: () => {
             if (!isVerified.value) isVerified.value = true;
             clearTimeout(failTimer);
@@ -196,6 +206,7 @@ export function initAuth(): void {
             clearTimeout(failTimer);
             settle();
           },
+          onClose: notifyLoginClosed,
         });
       })
       .catch((err) => {
@@ -206,34 +217,39 @@ export function initAuth(): void {
   });
 }
 
-/** 等待 isVerified 置位（登录完成信号） */
+/** 等待登录结束（验证成功或用户主动关闭弹窗） */
 function waitForVerified(timeoutMs = 5 * 60_000): Promise<void> {
   return new Promise((resolve) => {
     if (isVerified.value) return resolve();
-    const stop = watch(isVerified, (v) => {
-      if (v) {
-        stop();
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    const timer = setTimeout(() => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
       stop();
+      clearTimeout(timer);
+      const i = closeWaiters.indexOf(finish);
+      if (i >= 0) closeWaiters.splice(i, 1);
       resolve();
-    }, timeoutMs);
+    };
+    const stop = watch(isVerified, (v) => {
+      if (v) finish();
+    });
+    const timer = setTimeout(finish, timeoutMs);
+    closeWaiters.push(finish);
   });
 }
 
-/** 弹出登录窗并等待用户完成验证 */
+/** 弹出登录窗并等待用户完成验证（可关闭，默认展示验证码方式） */
 async function promptLogin(): Promise<boolean> {
   const WxAuth = await resolveWxAuth().catch((err) => {
     console.error("[auth] SDK 不可用，无法弹出登录窗", err);
     return null;
   });
   if (!WxAuth) return false;
-  // 注意：不用 requireAuth() 的返回值——SDK 在某些成功后路径上会先
-  // resolve(false) 再触发 onVerified，依赖它会把成功误判为失败。
-  void WxAuth.showAuthModal();
+  // required: false → 弹窗带关闭按钮、点遮罩可关闭
+  void WxAuth.showAuthModal({ required: false });
+  // 默认切到「公众号验证码」，不再只能扫码；用户仍可手动切回扫码
+  WxAuth.switchMode?.("code");
   await waitForVerified();
   return isVerified.value;
 }
