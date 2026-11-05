@@ -1,48 +1,34 @@
 /**
- * 搜索主流程（第三方静态站版）
+ * 搜索主流程（PanSou 数据源）
  *
- * 只有一条通道：SSE 长连接 `/api/search.stream`。
- * 服务端受控并发逐批抓取，每完成一批推送一个 chunk，前端边收边渲染。
+ * 对接 PanSou 的 `GET /api/search`（`res=merge`），一次请求返回按网盘类型聚合的
+ * `merged_by_type`。与 PanHub 官方后端的 SSE / 登录票据不同，PanSou 是公开接口：
+ * 无需登录、无需匿名票据，结果里直接带原始分享链接。
  *
- * 为什么不做「非流式回退」：官方 API 的 SSE 通道稳定可用，多留一条回退
- * 路径只会让前端多维护一套批次调度逻辑（countOnly 取批数 + 分批并发），
- * 而正常使用中永远不会触发。这里保持单通道，逻辑更少、更可读。
- *
- * 「继续搜索」：回传 skipTasks（已完成任务索引）+ initialTotal（已有结果数），
- * 服务端只跑未搜过的任务，按「已有 + 本轮新增 ≥ 目标值」自行停止。
+ * 「继续搜索」在 PanSou 模式下没有增量语义（服务端一次返回当轮全部结果），
+ * 这里保留按钮契约：暂停后点「继续」= 重新请求一次并整体替换结果。
  */
 import { computed, ref } from "vue";
-import { MAX_RESULTS_PER_ROUND } from "../config";
-import { apiUrl, authHeaders } from "../api/client";
-import { getAnonTicketSafe } from "../api/auth";
-import type { MergedLinks } from "../types";
+import { apiUrl } from "../api/client";
+import type { MergedLinks, SearchResponse } from "../types";
 import { countMerged, mergeMergedByType } from "../utils/merge";
 
 export interface SearchOptions {
   keyword: string;
-  /** 类别搜索（空 = 全部网盘） */
+  /** 类别搜索（空 = 全部网盘），映射到 PanSou 的 cloud_types */
   cat?: string;
-  /** 服务端返回 401 时回调（登录态失效，需要重新认证） */
+  /** 保留旧接口签名；PanSou 不需要登录，回调不会被触发 */
   onAuthRequired?: () => void;
 }
 
-interface ParsedSSEEvent {
-  event: string;
-  data: string;
+interface SearchEnvelope {
+  code?: number;
+  message?: string;
+  data?: SearchResponse;
 }
 
-/** 解析一行 SSE 事件块（event:xxx\ndata:yyy） */
-function parseSSEEventBlock(raw: string): ParsedSSEEvent | null {
-  const lines = raw.split("\n");
-  let event = "message";
-  let data = "";
-  for (const line of lines) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) data += line.slice(5).trim();
-  }
-  if (!data) return null;
-  return { event, data };
-}
+/** 单次搜索超时：PanSou 的异步插件通常数秒返回，慢源最多等 60s */
+const REQUEST_TIMEOUT_MS = 60_000;
 
 export function useSearch() {
   const state = ref({
@@ -57,25 +43,19 @@ export function useSearch() {
   });
 
   let searchSeq = 0;
-  /** 新搜索时保留旧结果展示，首批新结果到达后整体替换（丝滑搜索） */
-  let freshSearch = true;
-  const activeControllers: AbortController[] = [];
+  let activeController: AbortController | null = null;
   const autoPausedAtLimit = ref(false);
-  /** 断点续跑：已完成的内部任务索引 */
-  let completedTaskGidx = new Set<number>();
 
   function cancelActiveRequests(): void {
-    for (const controller of activeControllers) {
-      try {
-        controller.abort();
-      } catch {}
-    }
-    activeControllers.length = 0;
+    if (!activeController) return;
+    try {
+      activeController.abort();
+    } catch {}
+    activeController = null;
   }
 
   function pauseSearch(): void {
     if (state.value.loading || state.value.deepLoading) {
-      autoPausedAtLimit.value = false;
       state.value.paused = true;
       cancelActiveRequests();
     }
@@ -85,7 +65,6 @@ export function useSearch() {
     cancelActiveRequests();
     searchSeq++;
     autoPausedAtLimit.value = false;
-    completedTaskGidx.clear();
     state.value.loading = false;
     state.value.deepLoading = false;
     state.value.paused = false;
@@ -96,147 +75,65 @@ export function useSearch() {
     state.value.merged = {};
   }
 
-  /**
-   * SSE 搜索：一个长连接承载整个搜索。
-   *
-   * @param initialMerged 「继续」时传入已有结果，避免覆盖
-   * @param initialTotal  前端已有结果数，参与服务端上限判断
-   * @param maxResults    本轮目标总数（首搜不传 = 服务端默认 90）
-   */
-  async function runStream(
-    options: SearchOptions,
-    mySeq: number,
-    initialMerged?: MergedLinks,
-    initialTotal = 0,
-    maxResults?: number
-  ): Promise<void> {
-    const { keyword, cat, onAuthRequired } = options;
-
-    const params: Record<string, string | number | undefined> = { kw: keyword };
-    if (cat) params.cat = cat;
-    // 匿名票据（对齐官方站 2026-09-24 访客准入）：建连前拼在 URL 上（流式连接
-    // 不能靠 401 重试补票）。拿不到 → 不带，服务端对无票访客按策略放行（fail-open）
-    const anonTicket = await getAnonTicketSafe().catch(() => null);
-    if (anonTicket) params.at = anonTicket;
-    if (maxResults != null && maxResults > 0) params.maxResults = maxResults;
-    // 断点续跑：回传已完成任务索引，服务端只跑未搜过的
-    if (completedTaskGidx.size > 0) {
-      params.skipTasks = [...completedTaskGidx].join(",");
-    }
-    if (initialTotal > 0) params.initialTotal = initialTotal;
+  /** 请求 PanSou 搜索接口，返回 merged_by_type（失败抛错） */
+  async function fetchMerged(keyword: string, cat?: string): Promise<MergedLinks> {
+    const params: Record<string, string> = { kw: keyword, res: "merge" };
+    if (cat) params.cloud_types = cat;
 
     const controller = new AbortController();
-    activeControllers.push(controller);
-
-    let currentMerged: MergedLinks = initialMerged ? { ...initialMerged } : {};
+    activeController = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
 
     try {
-      const resp = await fetch(apiUrl("/search.stream", params), {
+      const resp = await fetch(apiUrl("/search", params), {
         signal: controller.signal,
-        // 跨域 + 通配 CORS，必须 omit；认证只靠 Authorization 头
+        // 公共 API 无关 Cookie，避免跨域凭证请求被拒
         credentials: "omit",
-        headers: { accept: "text/event-stream", ...authHeaders() },
+        headers: { accept: "application/json" },
       });
-
-      if (resp.status === 401) {
-        onAuthRequired?.();
-        return;
-      }
       if (!resp.ok) {
-        state.value.error = `搜索服务暂时不可用（${resp.status}），请稍后重试`;
-        return;
+        throw new Error(`搜索服务暂时不可用（${resp.status}），请稍后重试`);
       }
-      if (!resp.body) {
-        state.value.error = "当前浏览器不支持流式搜索，请更换浏览器后重试";
-        return;
+      const body = (await resp.json()) as SearchEnvelope;
+      if (body?.code !== 0) {
+        throw new Error(body?.message || "搜索服务返回异常");
       }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let sepIdx = -1;
-        while ((sepIdx = buffer.indexOf("\n\n")) >= 0) {
-          const raw = buffer.slice(0, sepIdx);
-          buffer = buffer.slice(sepIdx + 2);
-          const evt = parseSSEEventBlock(raw);
-          if (!evt) continue;
-
-          // 已重置 / 已暂停 → 主动断开
-          if (mySeq !== searchSeq || state.value.paused) {
-            controller.abort();
-            return;
-          }
-
-          if (evt.event === "chunk") {
-            try {
-              const payload = JSON.parse(evt.data);
-              if (payload.merged) {
-                currentMerged = freshSearch
-                  ? payload.merged
-                  : mergeMergedByType(currentMerged, payload.merged);
-                freshSearch = false;
-                state.value.merged = currentMerged;
-                state.value.total = countMerged(currentMerged);
-              }
-            } catch {}
-          } else if (evt.event === "done") {
-            try {
-              const payload = JSON.parse(evt.data);
-              // done 的 merged 同样走合并去重，绝不直接覆盖：
-              // 服务端 acc 是本次连接的累计快照，「继续」时缓存失效会导致
-              // acc < 前端已有结果，直接覆盖会丢数据
-              if (
-                payload.merged &&
-                (freshSearch || Object.keys(payload.merged).length > 0)
-              ) {
-                currentMerged = freshSearch
-                  ? payload.merged
-                  : mergeMergedByType(currentMerged, payload.merged);
-                state.value.merged = currentMerged;
-              }
-              freshSearch = false;
-              // total 始终按前端真实数据重算，避免数字被服务端快照覆盖变小
-              state.value.total = countMerged(currentMerged);
-
-              if (Array.isArray(payload.completedIndices)) {
-                for (const i of payload.completedIndices) {
-                  const n = Number(i);
-                  if (Number.isFinite(n)) completedTaskGidx.add(n);
-                }
-              }
-              // 服务端已因达到上限停止剩余任务 → 展示「继续」
-              if (payload.reachedLimit) {
-                autoPausedAtLimit.value = true;
-                state.value.paused = true;
-                // 保持 loading=true，让「继续」按钮可见
-              }
-            } catch {}
-            return;
-          } else if (evt.event === "error") {
-            try {
-              const payload = JSON.parse(evt.data);
-              state.value.error = payload.message || "搜索异常";
-            } catch {}
-            return;
-          }
-        }
-      }
+      const merged = body?.data?.merged_by_type;
+      return merged && typeof merged === "object" ? merged : {};
     } catch (error: any) {
+      const isAbort =
+        error?.name === "AbortError" || error?.cause?.name === "AbortError";
+      if (isAbort && timedOut) throw new Error("搜索超时，请稍后重试");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      if (activeController === controller) activeController = null;
+    }
+  }
+
+  async function runSearch(
+    options: SearchOptions,
+    mySeq: number,
+    replace: boolean
+  ): Promise<void> {
+    try {
+      const merged = await fetchMerged(options.keyword.trim(), options.cat);
+      if (mySeq !== searchSeq) return;
+      state.value.merged = replace
+        ? merged
+        : mergeMergedByType(state.value.merged, merged);
+      state.value.total = countMerged(state.value.merged);
+    } catch (error: any) {
+      if (mySeq !== searchSeq) return;
       // 主动 abort（暂停 / 重置）不算失败
       const isAbort =
         error?.name === "AbortError" || error?.cause?.name === "AbortError";
-      if (!isAbort) {
-        state.value.error = "网络异常，搜索中断，请重试";
-      }
-    } finally {
-      const idx = activeControllers.indexOf(controller);
-      if (idx >= 0) activeControllers.splice(idx, 1);
+      if (isAbort) return;
+      state.value.error = error?.message || "网络异常，搜索中断，请重试";
     }
   }
 
@@ -260,23 +157,22 @@ export function useSearch() {
     state.value.searched = true;
     state.value.elapsedMs = 0;
     state.value.deepLoading = false;
-    freshSearch = true;
-    completedTaskGidx.clear();
+    state.value.paused = false;
     autoPausedAtLimit.value = false;
 
     const mySeq = ++searchSeq;
     const start = performance.now();
 
     try {
-      await runStream(options, mySeq);
-      if (mySeq !== searchSeq) return;
-    } catch (error: any) {
-      state.value.error = error?.message || "请求失败";
+      // replace：新关键词直接替换旧结果，避免两轮结果混在同一张列表里
+      await runSearch(options, mySeq, true);
     } finally {
-      state.value.elapsedMs = Math.round(performance.now() - start);
-      // 暂停时保持 loading=true，让「继续」按钮留在原位
-      if (!state.value.paused) state.value.loading = false;
-      state.value.deepLoading = false;
+      if (mySeq === searchSeq) {
+        state.value.elapsedMs = Math.round(performance.now() - start);
+        // 暂停时保持 loading=true，让「继续」按钮留在原位
+        if (!state.value.paused) state.value.loading = false;
+        state.value.deepLoading = false;
+      }
     }
   }
 
@@ -284,23 +180,20 @@ export function useSearch() {
     if (!state.value.paused || !state.value.searched) return;
 
     state.value.paused = false;
+    state.value.loading = true;
     state.value.deepLoading = true;
-    const resumingFresh = freshSearch;
-    freshSearch = false;
-    // 本轮是新搜索但首批结果还没到（屏幕上是上一轮旧结果）时，
-    // 不能拿旧结果当合并基底，否则两个关键词的结果会混在一张列表里
-    const resumeBase = resumingFresh ? undefined : state.value.merged;
-    const resumeTotal = resumingFresh ? 0 : state.value.total;
-    const targetMax = resumeTotal + MAX_RESULTS_PER_ROUND;
-    autoPausedAtLimit.value = false;
+    state.value.error = "";
+    const mySeq = ++searchSeq;
+    const start = performance.now();
 
     try {
-      await runStream(options, searchSeq, resumeBase, resumeTotal, targetMax);
-    } catch {
-      // 错误已在 runStream 内落库
+      await runSearch(options, mySeq, true);
     } finally {
-      state.value.deepLoading = false;
-      if (!state.value.paused) state.value.loading = false;
+      if (mySeq === searchSeq) {
+        state.value.elapsedMs = Math.round(performance.now() - start);
+        state.value.deepLoading = false;
+        if (!state.value.paused) state.value.loading = false;
+      }
     }
   }
 

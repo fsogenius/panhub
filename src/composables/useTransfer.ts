@@ -3,10 +3,9 @@
  *
  * 前端只持有一个轻量状态：key → idle | loading | done | dead。
  *
- * 本版本不再调用 POST /api/transfer（该接口要求登录），而是直接使用搜索结果里
- * 的原始分享链接交付。注意：服务端对已接入转存的盘型会剥离直链、只下发 tid，
- * 这类条目没有 url，无法直接交付（会提示未提供原始链接）。没有 tid / 仍带
- * url 的条目可正常打开。
+ * PanSou 搜索结果直接携带原始分享链接，因此「获取」完全在前端完成：把链接 +
+ * 提取码拼成各网盘官方口令，再弹出二维码 / 可点地址。不调用任何转存或登录接口。
+ * 仅当条目没有 url（旧数据）时才提示无法获取。
  */
 import { computed, ref } from "vue";
 import { buildShareText, driverOf } from "../utils/shareText";

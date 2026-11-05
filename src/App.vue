@@ -229,7 +229,6 @@ import { useToast } from "./composables/useToast";
 import { useDarkMode } from "./composables/useDarkMode";
 import { useHotKeywords } from "./composables/useHotKeywords";
 import { platformInfo } from "./config/platforms";
-import { forceVerify } from "./api/auth";
 import { orderDriverGroups } from "./utils/driverPriority";
 import type { MergedLink } from "./types";
 
@@ -322,28 +321,8 @@ function onResize() {
 
 // ===== 搜索 =====
 
-// 「获取」401 处理（对齐官方站 2026-09-24）：搜索对访客放开后，登录卡点收敛到
-// 「获取」——401 时直接吊起 wx-auth SDK 登录弹窗（等同手动点登录），
-// forceVerify 在登录成功（isVerified 置位）时返回 true，useTransfer 收到后
-// 自动重试本次获取——全程无需再点一次。模块级注册：ResultGroup 等无参调用
-// 触发的获取同样生效。
+// 「获取」：PanSou 结果自带原始分享链接，直接本地交付，不再触发登录。
 useTransfer();
-
-/** 服务端 401：登录态失效 → 强制重新认证后重试 */
-let authRetrying = false;
-async function handleAuthRequired() {
-  if (authRetrying) return;
-  authRetrying = true;
-  try {
-    const ok = await forceVerify();
-    if (ok) {
-      resetSearch();
-      await doSearch();
-    }
-  } finally {
-    authRetrying = false;
-  }
-}
 
 async function doSearch() {
   const keyword = kw.value.trim();
@@ -352,7 +331,6 @@ async function doSearch() {
   await performSearch({
     keyword,
     cat: searchCat.value || undefined,
-    onAuthRequired: handleAuthRequired,
   });
 }
 
@@ -385,7 +363,6 @@ async function handleContinueSearch() {
   await continueSearch({
     keyword: kw.value.trim(),
     cat: searchCat.value || undefined,
-    onAuthRequired: handleAuthRequired,
   });
 }
 

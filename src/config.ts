@@ -1,17 +1,27 @@
 /**
- * 接口地址（硬编码，指向 PanHub 官方服务）
+ * 数据源地址：PanSou 公开搜索 API
  *
- * 本工程是 PanHub 开源的**纯静态前台**，只做两件事：
- *   1. 调 API 搜索
- *   2. 调 API「获取」（转存归因）
- * 登录交给 wx-auth 公共组件，数据由官方 API 提供。
+ * PanSou（https://github.com/fish2018/pansou）是 MIT 开源的网盘聚合搜索后端，
+ * 搜索接口公开、无需登录，返回结果直接带原始分享链接。可用构建时环境变量
+ * `VITE_PANSOU_API_BASE` 指向自建实例（如 http://localhost:8888/api）。
  *
- * 为什么写死地址：搜索与「获取」是强登录接口，登录态由官方服务统一校验，
- * 换地址并不能绕过校验；写死可避免部署方误配导致页面白屏。
+ * 默认用公共演示站便于开箱即用；它由第三方维护，长期稳定请务必自建。
  */
-export const API_BASE = "https://panhub.shenzjd.com/api";
+const DEFAULT_API_BASE = "https://so.252035.xyz/api";
 
-/** wx-auth 公共登录服务（登录态唯一签发方） */
+export const API_BASE = String(
+  import.meta.env.VITE_PANSOU_API_BASE || DEFAULT_API_BASE
+).replace(/\/+$/, "");
+
+/**
+ * 是否启用链接探活。
+ *
+ * PanSou 的探活接口是 POST /api/check/links，但公共演示站尚未升级（404）。
+ * 自建新版 PanSou 可改为 true 并适配 useLinkCheck 的请求格式。
+ */
+export const ENABLE_LINK_CHECK = false;
+
+/** wx-auth 公共登录服务（保留给 site-navbar，不再参与搜索流程） */
 export const WX_AUTH_API_BASE = "https://wx-auth.shenzjd.com";
 
 /**

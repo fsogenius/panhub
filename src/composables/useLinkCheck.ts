@@ -18,6 +18,7 @@
 import { ref } from "vue";
 import { apiPost } from "../api/client";
 import { getAnonTicketSafe } from "../api/auth";
+import { ENABLE_LINK_CHECK } from "../config";
 
 export type LinkCheckStatus =
   | "ok"
@@ -165,5 +166,10 @@ let _instance: ReturnType<typeof createStore> | null = null;
 
 export function useLinkCheck() {
   if (!_instance) _instance = createStore();
+  // PanSou 公共演示站没有 /api/check/links，直接停用探活，避免每次搜索都打 404。
+  // 返回同一个结构，调用方无需感知。
+  if (!ENABLE_LINK_CHECK) {
+    return { ..._instance, enqueue: (_links: CheckTarget[]) => {} };
+  }
   return _instance;
 }
